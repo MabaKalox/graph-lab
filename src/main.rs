@@ -15,19 +15,33 @@ pub struct GraphNode {
 
 pub struct Edge {
     weight: Option<i32>,
-    id: String,
+    node_prt: Rc<GraphNode>,
 }
 
 pub struct GraphListElement {
-    node: Box<GraphNode>,
+    node_ptr: Rc<GraphNode>,
     neighborhoods: List<Edge>,
 }
 
 impl GraphListElement {
-    pub fn new(id: String, name: String) -> Self {
+    pub fn new(node_ptr: Rc<GraphNode>) -> Self {
         Self {
-            node: Box::new(GraphNode { id, name }),
+            node_ptr,
             neighborhoods: List::new(),
+        }
+    }
+}
+
+pub struct Graph {
+    nodes: List<Rc<GraphNode>>,
+    adjacency_list_repr: List<GraphListElement>,
+}
+
+impl Graph {
+    pub fn new() -> Self {
+        Graph {
+            nodes: List::new(),
+            adjacency_list_repr: List::new(),
         }
     }
 }
@@ -72,13 +86,16 @@ pub fn parse_csv_file<F: FnMut(Rc<String>) -> bool>(
 }
 
 fn main() -> std::io::Result<()> {
-    let mut graph: List<GraphListElement> = List::new();
+    let mut graph = Graph::new();
 
     if let Err(err) = parse_csv_file(Path::new(NODES_FILE_PATH), |line| {
         let mut it = line.trim().split(",");
         match (it.next(), it.next()) {
             (Some(id), Some(name)) => {
-                graph.push(GraphListElement::new(id.to_owned(), name.to_owned()));
+                graph.nodes.push(Rc::new(GraphNode {
+                    id: id.to_owned(),
+                    name: name.to_owned(),
+                }));
                 true
             }
             _ => false,
@@ -86,21 +103,28 @@ fn main() -> std::io::Result<()> {
     }) {
         return Err(err);
     }
+    for node in graph.nodes.iter() {
+        graph.adjacency_list_repr.push(GraphListElement::new(node.clone()));
+    }
 
     if let Err(err) = parse_csv_file(Path::new(EDGES_FILE_PATH), |line| {
         let mut it = line.trim().split(",");
         match (it.next(), it.next(), it.next()) {
             (Some(from), Some(to), Some(weight)) => {
-                match graph.seek_mut_f(|node| from.eq(&node.node.id)).peek_mut() {
-                    Some(v) => {
+                let mut combinations = List::new();
+                combinations.push((from, to));
+                combinations.push((to, from));
+                for (x, y) in combinations.iter() {
+                    if let Some(v) = graph.adjacency_list_repr.seek_mut_f(|node| x.eq(&node.node_ptr.id)).peek_mut() {
                         v.neighborhoods.push(Edge {
-                            id: to.to_owned(),
-                            weight: weight.parse::<i32>().map_or(None, |v| Some(v))
+                            node_prt: graph.nodes.seek_f(|node| node.id.eq(y)).peek().unwrap().clone(),
+                            weight: weight.parse::<i32>().map_or(None, |v| Some(v)),
                         });
-                        true
+                    } else {
+                        return false;
                     }
-                    _ => false,
                 }
+                return true;
             }
             _ => false,
         }
@@ -108,10 +132,10 @@ fn main() -> std::io::Result<()> {
         return Err(err);
     }
 
-    for node in graph.iter() {
-        print!("{}:", node.node.id);
+    for node in graph.adjacency_list_repr.iter() {
+        print!("{}:", node.node_ptr.id);
         for edge in node.neighborhoods.iter() {
-            print!(" -> {}", edge.id);
+            print!(" -> {}", edge.node_prt.id);
         }
         println!();
     }
