@@ -77,6 +77,21 @@ impl<T> List<T> {
         }
         return it_mut;
     }
+
+    pub fn remove_f<F: Fn(&T) -> bool>(&mut self, comparator: F) -> Option<T> {
+        let mut curr_link = &mut self.head;
+        loop {
+            match curr_link {
+                None => return None,
+                Some(node_ref) if comparator(&node_ref.elem) => {
+                    let boxed_node = curr_link.take().unwrap();
+                    *curr_link = boxed_node.next;
+                    return Some(boxed_node.elem);
+                }
+                Some(node) => curr_link = &mut node.next,
+            };
+        }
+    }
 }
 
 impl<T> Drop for List<T> {
@@ -153,6 +168,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::ops::Deref;
     use crate::List;
 
     #[test]
@@ -266,5 +282,24 @@ mod test {
         *list.seek_mut("1234").peek_mut().unwrap() = "abc";
 
         assert!(list.seek_mut("abc").peek_mut().is_some());
+    }
+
+    #[test]
+    fn remove_f() {
+        let mut list = List::new();
+        list.push("0");
+        list.push("1");
+        list.push("12");
+        list.push("123");
+
+        assert_eq!(list.remove_f(|node| "1".eq(node.deref())), Some("1"));
+        assert_eq!(list.remove_f(|node| "a".eq(node.deref())), None);
+
+        let mut it = list.iter();
+
+        assert_eq!(it.next(), Some(&"123"));
+        assert_eq!(it.next(), Some(&"12"));
+        assert_eq!(it.next(), Some(&"0"));
+        assert_eq!(it.next(), None);
     }
 }
