@@ -1,3 +1,5 @@
+use std::fmt;
+
 type Link<T> = Option<Box<Node<T>>>;
 
 pub struct List<T> {
@@ -166,10 +168,21 @@ where
     }
 }
 
+impl<T: fmt::Display> fmt::Display for List<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut it = self.iter();
+        it.next().map(|n| write!(f, "{}", n));
+        for value in it {
+            write!(f, ", {}", value).expect("Enable format list into text");
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::ops::Deref;
     use crate::List;
+    use std::ops::Deref;
 
     #[test]
     fn basics() {
@@ -281,7 +294,9 @@ mod test {
 
         *list.seek_mut("1234").peek_mut().unwrap() = "abc";
 
-        assert!(list.seek_mut("abc").peek_mut().is_some());
+        assert_eq!(list.seek_mut("abc").peek_mut(), Some(&mut "abc"));
+
+        assert_eq!(list.seek_mut("gdfsgsdfg").peek_mut(), None);
     }
 
     #[test]

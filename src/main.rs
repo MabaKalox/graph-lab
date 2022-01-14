@@ -2,12 +2,12 @@ use my_linked_list::List;
 use my_reader::BufReader;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::{fmt, io};
 
-const NODES_FILE_PATH: &str = "asoiaf-book5-nodes.csv";
-const EDGES_FILE_PATH: &str = "asoiaf-book5-edges.csv";
+const NODES_FILE_PATH: &str = "./datasets/asoiaf-book5-nodes.csv";
+const EDGES_FILE_PATH: &str = "./datasets/asoiaf-book5-edges.csv";
 
 pub struct GraphNode {
     name: String,
@@ -39,20 +39,80 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn new() -> Self {
-        Graph {
+    pub fn new_undirected(
+        nodes_source_file: &Path,
+        edges_source_file: &Path,
+    ) -> Result<Self, Error> {
+        let mut graph = Graph {
             nodes: List::new(),
             adjacency_list_repr: List::new(),
+        };
+
+        if let Err(err) = parse_csv_file(nodes_source_file, |line| {
+            let mut it = line.trim().split(",");
+            match (it.next(), it.next()) {
+                (Some(id), Some(name)) => {
+                    graph.nodes.push(Rc::new(GraphNode {
+                        id: id.to_owned(),
+                        name: name.to_owned(),
+                    }));
+                    true
+                }
+                _ => false,
+            }
+        }) {
+            return Err(err);
         }
+        for node_ptr in graph.nodes.iter() {
+            graph
+                .adjacency_list_repr
+                .push(GraphListElement::new(node_ptr.clone()));
+        }
+
+        if let Err(err) = parse_csv_file(edges_source_file, |line| {
+            let mut it = line.trim().split(",");
+            match (it.next(), it.next(), it.next()) {
+                (Some(from), Some(to), Some(weight)) => {
+                    let mut combinations = List::new();
+                    combinations.push((from, to));
+                    combinations.push((to, from));
+                    for (x, y) in combinations.iter() {
+                        if let Some(v) = graph
+                            .adjacency_list_repr
+                            .seek_mut_f(|node| x.eq(&node.node_ptr.id))
+                            .peek_mut()
+                        {
+                            v.neighborhoods.push(Edge {
+                                node_prt: graph
+                                    .nodes
+                                    .seek_f(|node| node.id.eq(y))
+                                    .peek()
+                                    .unwrap()
+                                    .clone(),
+                                weight: weight.parse::<i32>().map_or(None, |v| Some(v)),
+                            });
+                        } else {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                _ => false,
+            }
+        }) {
+            return Err(err);
+        }
+
+        return Ok(graph);
     }
 
     pub fn fmt_nodes(&self) -> String {
         let mut buff = String::new();
         let mut it = self.nodes.iter();
         if let Some(node) = it.next() {
-            buff += &node.id;
+            buff += &node.name;
             for node in it {
-                buff += &format!(", {}", node.id);
+                buff += &format!(", {}", node.name);
             }
         }
         return buff;
@@ -118,7 +178,10 @@ pub fn parse_csv_file<F: FnMut(Rc<String>) -> bool>(
     } else {
         return Err(Error::new(
             ErrorKind::NotFound,
-            format!("Enable to open file: {}", NODES_FILE_PATH),
+            format!(
+                "Enable to open file: {}",
+                file_path.to_str().expect("Something wend wrong with path")
+            ),
         ));
     }
     return Ok(());
@@ -134,85 +197,84 @@ pub fn get_user_input(prompt_msg: &str) -> String {
     return input.trim().to_owned();
 }
 
-pub fn del_demo(graph: &mut Graph) {
-    let input = get_user_input("Character to delete: ");
-    if let Some(t) = graph
-        .nodes
-        .seek_f(|n| n.id.eq(&input))
-        .peek()
-        .map(|n| n.clone())
-    {
-        if get_user_input(&format!("Found: {}, delete? [Y/n] ", input)) == "Y" {
-            graph.remove(t);
-        }
-    } else {
-        println!("Not found");
-    }
-}
-
 fn main() -> std::io::Result<()> {
-    let mut graph = Graph::new();
+    let mut graph1 =
+        match Graph::new_undirected(Path::new(NODES_FILE_PATH), Path::new(EDGES_FILE_PATH)) {
+            Ok(graph) => graph,
+            Err(e) => return Err(e),
+        };
 
-    if let Err(err) = parse_csv_file(Path::new(NODES_FILE_PATH), |line| {
-        let mut it = line.trim().split(",");
-        match (it.next(), it.next()) {
-            (Some(id), Some(name)) => {
-                graph.nodes.push(Rc::new(GraphNode {
-                    id: id.to_owned(),
-                    name: name.to_owned(),
-                }));
-                true
-            }
-            _ => false,
+    println!("Known characters: [ {} ]", graph1.fmt_nodes());
+
+    match get_user_input("Task num? [1, 2, 3, 4]: ").as_str() {
+        "1" => {
+            println!("{}", graph1);
         }
-    }) {
-        return Err(err);
-    }
-    for node_ptr in graph.nodes.iter() {
-        graph
-            .adjacency_list_repr
-            .push(GraphListElement::new(node_ptr.clone()));
-    }
-
-    if let Err(err) = parse_csv_file(Path::new(EDGES_FILE_PATH), |line| {
-        let mut it = line.trim().split(",");
-        match (it.next(), it.next(), it.next()) {
-            (Some(from), Some(to), Some(weight)) => {
-                let mut combinations = List::new();
-                combinations.push((from, to));
-                combinations.push((to, from));
-                for (x, y) in combinations.iter() {
-                    if let Some(v) = graph
-                        .adjacency_list_repr
-                        .seek_mut_f(|node| x.eq(&node.node_ptr.id))
-                        .peek_mut()
-                    {
-                        v.neighborhoods.push(Edge {
-                            node_prt: graph
-                                .nodes
-                                .seek_f(|node| node.id.eq(y))
-                                .peek()
-                                .unwrap()
-                                .clone(),
-                            weight: weight.parse::<i32>().map_or(None, |v| Some(v)),
-                        });
-                    } else {
-                        return false;
-                    }
+        "2" => {
+            let character_name = get_user_input("Character to delete: ");
+            if let Some(t) = graph1
+                .nodes
+                .seek_f(|n| n.name.eq(&character_name))
+                .peek()
+                .map(|n| n.clone())
+            {
+                if get_user_input(&format!("Found: {}, delete? [Y/n] ", character_name)) == "Y" {
+                    graph1.remove(t);
                 }
-                return true;
+                println!("{}", graph1);
+                println!("Deleted char name: {}", character_name);
+            } else {
+                println!("Not found");
             }
-            _ => false,
         }
-    }) {
-        return Err(err);
-    }
+        "3" => {
+            let graph2_nodes_source_file =
+                PathBuf::from(get_user_input("Second graph nodes dataset path: ").as_str());
+            let graph2_edges_source_file =
+                PathBuf::from(get_user_input("Second graph edges dataset path: ").as_str());
 
-    println!("Known characters: [ {} ]", graph.fmt_nodes());
+            let graph2 = match Graph::new_undirected(
+                graph2_nodes_source_file.as_path(),
+                graph2_edges_source_file.as_path(),
+            ) {
+                Ok(graph) => graph,
+                Err(e) => return Err(e),
+            };
 
-    del_demo(&mut graph);
+            let mut dead_characters = List::new();
 
-    println!("{}", graph);
+            for character in graph2.nodes.iter() {
+                if graph1
+                    .nodes
+                    .seek_f(|node| node.id.eq(&character.id))
+                    .peek()
+                    .is_none()
+                {
+                    dead_characters.push(character.name.clone());
+                }
+            }
+
+            let mut new_characters = List::new();
+
+            for character in graph1.nodes.iter() {
+                if graph2
+                    .nodes
+                    .seek_f(|node| node.id.eq(&character.id))
+                    .peek()
+                    .is_none()
+                {
+                    new_characters.push(character.name.clone());
+                }
+            }
+
+            println!("Who died: {}", dead_characters);
+            println!("Who new: {}", new_characters);
+        }
+        "4" => {
+            todo!()
+        }
+        _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid task number.")),
+    };
 
     return Ok(());
 }
